@@ -35,8 +35,9 @@ Thumbs.db
 *.log
 logs/
 
-# Uploads (user audio files — never commit)
-uploads/
+# Uploads (user audio files — never commit, but track .gitkeep)
+uploads/*
+!uploads/.gitkeep
 
 # ML model artifacts (large files)
 models/user_heads/

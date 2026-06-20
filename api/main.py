@@ -3,14 +3,14 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import auth
+from api.routers import audio, auth
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="RAG Audio Emotion Backend",
     description="Voice second brain: transcription, emotion analysis, personalization, RAG",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -23,6 +23,7 @@ app.add_middleware(
 
 # ── Routers ────────────────────────────────────────────────────────────────────
 app.include_router(auth.router)
+app.include_router(audio.router)
 
 
 # ── Lifecycle ──────────────────────────────────────────────────────────────────
@@ -43,7 +44,7 @@ def shutdown():
 
 @app.get("/")
 def root():
-    return {"message": "RAG Audio Emotion Backend", "version": "0.2.0", "docs": "/docs"}
+    return {"message": "RAG Audio Emotion Backend", "version": "0.3.0", "docs": "/docs"}
 
 
 @app.get("/health")
