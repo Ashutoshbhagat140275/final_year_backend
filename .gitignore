@@ -45,6 +45,10 @@ models/*.pt
 models/*.joblib
 models/*.npz
 
+# Datasets (downloaded — never commit, large)
+datasets/
+*.zip
+
 # Qdrant local storage
 qdrant_storage/
 
