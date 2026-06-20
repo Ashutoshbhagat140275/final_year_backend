@@ -20,7 +20,7 @@ def get_current_user(
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
-    # Stage 1: verify against in-memory store (Stage 2: Mongo re-verify)
+    # Re-verify user exists in DB (Mongo in Stage 2+, fallback in-memory if Mongo down)
     user = get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
