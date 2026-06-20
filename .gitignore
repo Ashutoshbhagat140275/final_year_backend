@@ -39,11 +39,13 @@ logs/
 uploads/*
 !uploads/.gitkeep
 
-# ML model artifacts (large files)
+# ML model artifacts — ignore per-user heads & caches, but SHIP the global head
 models/user_heads/
 models/*.pt
 models/*.joblib
 models/*.npz
+!models/global_emotion_head.pt
+!models/embedding_scaler.joblib
 
 # Datasets (downloaded — never commit, large)
 datasets/

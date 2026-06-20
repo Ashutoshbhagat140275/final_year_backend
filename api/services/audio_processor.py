@@ -39,23 +39,31 @@ def process_audio(user_id: str, file: UploadFile) -> dict:
     audio_path = _save_file(user_id, file)
     audio_path = _preprocess(audio_path)
 
-    # Stage 3 stubs — replaced in later stages
-    emotion, confidence = _stub_classify()
-    transcription = ""
-    session_id = _persist_session(user_id, audio_path, emotion, confidence, transcription)
+    # Stage 4: real Wav2Vec2 embedding + dual-head classification (global-only here)
+    from api.services.dual_head_classifier import classify_with_dual_heads
+    from api.services.wav2vec2_encoder import extract_wav2vec2_embedding
+
+    embedding = extract_wav2vec2_embedding(str(audio_path))
+    feedback_count = _get_feedback_count(user_id)
+    result = classify_with_dual_heads(embedding, user_id, feedback_count)
+
+    transcription = ""  # Stage 5
+    session_id = _persist_session(
+        user_id, audio_path, result["emotion"], result["confidence"], transcription, embedding
+    )
 
     return {
         "session_id": session_id,
-        "emotion": emotion,
-        "confidence": confidence,
-        "global_emotion": emotion,
-        "global_confidence": confidence,
-        "user_emotion": None,
-        "user_confidence": None,
-        "blend_weight": 1.0,
-        "alpha_data": None,
-        "alpha_conf": None,
-        "alpha_formula": "sigmoid",
+        "emotion": result["emotion"],
+        "confidence": result["confidence"],
+        "global_emotion": result["global_emotion"],
+        "global_confidence": result["global_confidence"],
+        "user_emotion": result["user_emotion"],
+        "user_confidence": result["user_confidence"],
+        "blend_weight": result["blend_weight"],
+        "alpha_data": result["alpha_data"],
+        "alpha_conf": result["alpha_conf"],
+        "alpha_formula": result["alpha_formula"],
         "transcription": transcription,
         "timestamp": datetime.now(timezone.utc),
         "owner_speech_ratio": None,
@@ -64,6 +72,17 @@ def process_audio(user_id: str, file: UploadFile) -> dict:
         "owner_detection_status": None,
         "speaker_timeline": [],
     }
+
+
+def _get_feedback_count(user_id: str) -> int:
+    from api.db.mongodb import get_database
+    from api.models.user import User
+
+    db = get_database()
+    if db is None:
+        return 0
+    doc = User.get_collection(db).find_one({"user_id": user_id}, {"feedback_count": 1})
+    return int(doc.get("feedback_count", 0)) if doc else 0
 
 
 # ── Validation ─────────────────────────────────────────────────────────────────
@@ -140,12 +159,6 @@ def _preprocess(path: Path) -> Path:
     return out_path
 
 
-# ── Stub emotion (Stage 3) ─────────────────────────────────────────────────────
-
-def _stub_classify() -> tuple[str, float]:
-    return ("neutral", 0.5)
-
-
 # ── Persist session ────────────────────────────────────────────────────────────
 
 def _persist_session(
@@ -154,6 +167,7 @@ def _persist_session(
     emotion: str,
     confidence: float,
     transcription: str,
+    embedding=None,
 ) -> str:
     from api.db.mongodb import get_database
     from api.models.audio_session import AudioSession
@@ -171,7 +185,27 @@ def _persist_session(
     db = get_database()
     if db is not None:
         AudioSession.get_collection(db).insert_one(session.to_dict())
+        # Store the 768-dim embedding for later user-head training (Stage 5+ model)
+        if embedding is not None:
+            _persist_emotion_analysis(db, user_id, session_id, emotion, confidence, embedding)
     else:
         logger.warning("MongoDB unavailable — session %s not persisted", session_id)
 
     return session_id
+
+
+def _persist_emotion_analysis(db, user_id, session_id, emotion, confidence, embedding) -> None:
+    """Store the Wav2Vec2 embedding (historical field name: mfcc_features)."""
+    try:
+        from api.models.emotion_analysis import EmotionAnalysis
+
+        ea = EmotionAnalysis(
+            user_id=user_id,
+            session_id=session_id,
+            emotion_label=emotion,
+            confidence=confidence,
+            mfcc_features=[float(x) for x in embedding],
+        )
+        EmotionAnalysis.get_collection(db).insert_one(ea.to_dict())
+    except Exception as exc:
+        logger.warning("EmotionAnalysis not persisted: %s", exc)

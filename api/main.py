@@ -33,6 +33,13 @@ def startup():
     from api.db.mongodb import connect_mongodb
     connect_mongodb()
 
+    # Detect + eager-load the global emotion head (graceful if missing)
+    from api.services.global_emotion_head import load_global_head
+    if load_global_head():
+        logger.info("Active emotion model: global-head")
+    else:
+        logger.warning("No global head found — emotion falls back to neutral/0.5")
+
 
 @app.on_event("shutdown")
 def shutdown():

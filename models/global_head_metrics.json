@@ -1,0 +1,27 @@
+{
+  "train_samples": 6216,
+  "val_samples": 1328,
+  "test_samples": 1338,
+  "best_val_loss": 0.9121,
+  "test_accuracy": 0.6241,
+  "per_class_test_accuracy": {
+    "neutral": 0.725,
+    "calm": 1.0,
+    "happy": 0.541,
+    "sad": 0.573,
+    "angry": 0.759,
+    "fearful": 0.523,
+    "disgusted": 0.573,
+    "surprised": 0.767
+  },
+  "class_weights": {
+    "neutral": 0.938,
+    "calm": 5.799,
+    "happy": 0.759,
+    "sad": 0.759,
+    "angry": 0.759,
+    "fearful": 0.759,
+    "disgusted": 0.759,
+    "surprised": 5.799
+  }
+}
