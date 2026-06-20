@@ -86,5 +86,11 @@ def classify_with_dual_heads(embedding: np.ndarray, user_id: str, feedback_count
 
 
 def _try_user_head(embedding: np.ndarray, user_id: str):
-    """Stage 4 stub — no user heads yet. Stage 7 loads from user_head_storage (LRU)."""
-    return None
+    """Load the per-user head (LRU-cached) and return its probabilities, or None."""
+    try:
+        from api.services.user_emotion_head import predict_user_proba
+
+        return predict_user_proba(embedding, user_id)
+    except Exception as exc:
+        logger.warning("user head inference failed for %s: %s", user_id, exc)
+        return None

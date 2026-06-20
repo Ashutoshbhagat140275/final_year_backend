@@ -32,7 +32,12 @@ def query_rag(user_id: str, query: str, top_k: int = 5) -> dict:
         logger.warning("Query embedding failed: %s", exc)
         query_embedding = None
 
-    # 2) Stage 7: semantic cache check goes here
+    # 2) semantic cache check (skip LLM on hit)
+    from api.services.query_cache import check_cache, store_in_cache
+
+    cached = check_cache(user_id, query, top_k, query_embedding)
+    if cached is not None:
+        return cached
 
     # 3) retrieve
     sources = search_documents(user_id, query, top_k=top_k, query_embedding=query_embedding)
@@ -63,6 +68,7 @@ def query_rag(user_id: str, query: str, top_k: int = 5) -> dict:
         }
         for s in sources
     ]
+    store_in_cache(user_id, query, top_k, query_embedding, answer, formatted)
     return {"answer": answer, "sources": formatted, "query": query}
 
 

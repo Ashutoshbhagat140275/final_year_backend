@@ -3,14 +3,14 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import audio, auth, rag, speaker
+from api.routers import admin, audio, auth, dashboard, feedback, rag, speaker
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="RAG Audio Emotion Backend",
     description="Voice second brain: transcription, emotion analysis, personalization, RAG",
-    version="0.6.0",
+    version="0.7.0",
 )
 
 app.add_middleware(
@@ -26,6 +26,9 @@ app.include_router(auth.router)
 app.include_router(audio.router)
 app.include_router(rag.router)
 app.include_router(speaker.router)
+app.include_router(feedback.router)
+app.include_router(dashboard.router)
+app.include_router(admin.router)
 
 
 # ── Lifecycle ──────────────────────────────────────────────────────────────────
@@ -38,6 +41,10 @@ def startup():
     # Connect Qdrant (fail-soft — vector search disabled if down)
     from api.db.qdrant import connect_qdrant
     connect_qdrant()
+
+    # Connect Redis (fail-soft — query cache disabled if down)
+    from api.db.redis import connect_redis
+    connect_redis()
 
     # Detect + eager-load the global emotion head (graceful if missing)
     from api.services.global_emotion_head import load_global_head
@@ -57,7 +64,7 @@ def shutdown():
 
 @app.get("/")
 def root():
-    return {"message": "RAG Audio Emotion Backend", "version": "0.6.0", "docs": "/docs"}
+    return {"message": "RAG Audio Emotion Backend", "version": "0.7.0", "docs": "/docs"}
 
 
 @app.get("/health")

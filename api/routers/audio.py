@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 
-from api.middleware.auth import get_current_user, get_current_user_id
+from api.middleware.auth import get_current_user_id
 from api.schemas.audio import UploadResponse
 from api.services.audio_processor import process_audio
 
@@ -17,12 +17,5 @@ def upload_audio(
     return process_audio(user_id, file)
 
 
-@router.post("/feedback")
-def audio_feedback_legacy(
-    _user: dict = Depends(get_current_user),
-):
-    """Legacy alias — use POST /api/feedback instead."""
-    raise HTTPException(
-        status_code=status.HTTP_301_MOVED_PERMANENTLY,
-        detail="Use POST /api/feedback instead",
-    )
+# POST /api/audio/feedback is served by the feedback router (Stage 7) — the real
+# personalization endpoint the mobile app calls.

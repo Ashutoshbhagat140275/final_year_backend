@@ -144,6 +144,10 @@ def _index_transcript(user_id: str, transcription: str, session_id: str, emotion
         from api.services.vector_store import store_document
 
         store_document(user_id, transcription, session_id, emotion_label=emotion)
+        # New content invalidates the user's semantic query cache
+        from api.services.query_cache import invalidate_user_cache
+
+        invalidate_user_cache(user_id)
     except Exception as exc:
         logger.warning("Transcript indexing failed (session %s): %s", session_id, exc)
 
