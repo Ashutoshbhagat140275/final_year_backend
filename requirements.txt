@@ -29,11 +29,20 @@ torch
 transformers
 
 # Whisper (Stage 5+)
-openai-whisper==20231117
+# Install with --no-deps to avoid disturbing the pinned torch/transformers:
+#   pip install --no-deps openai-whisper sentence-transformers
+#   pip install tiktoken more-itertools Pillow qdrant-client
+openai-whisper          # verified: 20250625
 
 # Vector store + Text embeddings (Stage 5+)
-sentence-transformers==2.2.2
-qdrant-client==1.7.0
+# NOTE: doc pins (sentence-transformers 2.2.2, qdrant-client 1.7.0) are INCOMPATIBLE
+# with transformers 5.x — they would downgrade it and break the fine-tuned model.
+# Use current releases. qdrant-client >=1.12 replaced .search() with .query_points().
+sentence-transformers   # verified: 5.6.0
+qdrant-client           # verified: 1.18.0
+tiktoken
+more-itertools
+Pillow
 
 # Redis cache (Stage 7+)
 redis==5.0.1

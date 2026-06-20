@@ -47,10 +47,14 @@ def process_audio(user_id: str, file: UploadFile) -> dict:
     feedback_count = _get_feedback_count(user_id)
     result = classify_with_dual_heads(embedding, user_id, feedback_count)
 
-    transcription = ""  # Stage 5
+    # Stage 5: transcribe (Whisper) + index transcript embedding (Qdrant)
+    from api.services.transcription import transcribe_audio
+
+    transcription = transcribe_audio(str(audio_path))
     session_id = _persist_session(
         user_id, audio_path, result["emotion"], result["confidence"], transcription, embedding
     )
+    _index_transcript(user_id, transcription, session_id, result["emotion"])
 
     return {
         "session_id": session_id,
@@ -83,6 +87,18 @@ def _get_feedback_count(user_id: str) -> int:
         return 0
     doc = User.get_collection(db).find_one({"user_id": user_id}, {"feedback_count": 1})
     return int(doc.get("feedback_count", 0)) if doc else 0
+
+
+def _index_transcript(user_id: str, transcription: str, session_id: str, emotion: str) -> None:
+    """Embed + upsert the transcript into the user's Qdrant collection (fail-soft)."""
+    if not transcription:
+        return
+    try:
+        from api.services.vector_store import store_document
+
+        store_document(user_id, transcription, session_id, emotion_label=emotion)
+    except Exception as exc:
+        logger.warning("Transcript indexing failed (session %s): %s", session_id, exc)
 
 
 # ── Validation ─────────────────────────────────────────────────────────────────
