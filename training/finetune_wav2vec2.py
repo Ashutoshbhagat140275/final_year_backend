@@ -184,21 +184,33 @@ def run(args):
     # class weights (inverse freq) from train split
     counts = np.bincount([e["label_idx"] for e in splits["train"]], minlength=NUM_CLASSES).astype(np.float32)
     weights = np.where(counts > 0, counts.sum() / (NUM_CLASSES * counts), 0.0)
-    criterion = nn.CrossEntropyLoss(weight=torch.tensor(weights, dtype=torch.float32, device=device))
+    criterion = nn.CrossEntropyLoss(
+        weight=torch.tensor(weights, dtype=torch.float32, device=device), label_smoothing=0.1
+    )
     optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=1e-4)
     scaler = torch.cuda.amp.GradScaler(enabled=(device == "cuda"))
+
+    # Linear warmup -> cosine decay over optimizer steps (stabilizes transformer fine-tuning)
+    from transformers import get_cosine_schedule_with_warmup
+    steps_per_epoch = max(1, len(train_dl) // args.accum)
+    total_steps = steps_per_epoch * args.epochs
+    scheduler = get_cosine_schedule_with_warmup(optimizer, int(0.1 * total_steps), total_steps)
 
     start_epoch = 1
     best_val = float("inf")
     bad = 0
+    best_state = None
     if CKPT.exists():
         ck = torch.load(CKPT, map_location=device)
         model.load_state_dict(ck["model"])
         optimizer.load_state_dict(ck["optim"])
         scaler.load_state_dict(ck["scaler"])
+        if ck.get("scheduler"):
+            scheduler.load_state_dict(ck["scheduler"])
         start_epoch = ck["epoch"] + 1
         best_val = ck["best_val"]
         bad = ck["bad"]
+        best_state = ck.get("best_state")
         print(f"Resumed from epoch {ck['epoch']} (best_val={best_val:.4f})")
 
     def evaluate(dl):
@@ -232,6 +244,7 @@ def run(args):
             if (step + 1) % args.accum == 0:
                 scaler.step(optimizer)
                 scaler.update()
+                scheduler.step()
                 optimizer.zero_grad()
 
         val_loss, val_acc, _, _ = evaluate(val_dl)
@@ -239,16 +252,22 @@ def run(args):
         if improved:
             best_val = val_loss
             bad = 0
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
         else:
             bad += 1
         torch.save({"model": model.state_dict(), "optim": optimizer.state_dict(),
-                    "scaler": scaler.state_dict(), "epoch": epoch, "best_val": best_val,
-                    "bad": bad}, CKPT)
+                    "scaler": scaler.state_dict(), "scheduler": scheduler.state_dict(),
+                    "epoch": epoch, "best_val": best_val, "bad": bad, "best_state": best_state}, CKPT)
         print(f"  epoch {epoch:>2}  val_loss={val_loss:.4f}  val_acc={val_acc:.3f}  "
               f"({time.time()-t0:.0f}s)  {'*' if improved else ''}", flush=True)
         if bad >= args.patience:
             print(f"  early stop at epoch {epoch}")
             break
+
+    # Restore the BEST checkpoint (lowest val_loss) before final eval + save
+    if best_state is not None:
+        model.load_state_dict(best_state)
+        print("Restored best-val checkpoint for final eval/save")
 
     # Final test eval
     test_loss, test_acc, preds, labels = evaluate(test_dl)
@@ -283,12 +302,12 @@ def run(args):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--epochs", type=int, default=12)
-    ap.add_argument("--batch", type=int, default=4)
-    ap.add_argument("--accum", type=int, default=8)
-    ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--epochs", type=int, default=20)
+    ap.add_argument("--batch", type=int, default=12)
+    ap.add_argument("--accum", type=int, default=2)
+    ap.add_argument("--lr", type=float, default=2e-5)
     ap.add_argument("--max-seconds", type=float, default=5.0)
-    ap.add_argument("--patience", type=int, default=4)
+    ap.add_argument("--patience", type=int, default=5)
     args = ap.parse_args()
     run(args)
 

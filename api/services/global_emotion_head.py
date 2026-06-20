@@ -22,11 +22,14 @@ logger = logging.getLogger(__name__)
 MODELS_DIR = Path(__file__).resolve().parent.parent.parent / "models"
 HEAD_PATH = MODELS_DIR / "global_emotion_head.pt"
 SCALER_PATH = MODELS_DIR / "embedding_scaler.joblib"
+FINETUNED_HEAD_PATH = MODELS_DIR / "global_emotion_head_finetuned.pt"
+FINETUNED_BACKBONE = MODELS_DIR / "wav2vec2_finetuned"
 
 _head = None
 _scaler = None
 _loaded = False
 _available = False
+_active = "none"
 
 
 def _build_head():
@@ -34,19 +37,43 @@ def _build_head():
     return nn.Linear(EMBEDDING_DIM, NUM_CLASSES)
 
 
+def _use_finetuned() -> bool:
+    from api.config import settings
+
+    return (
+        settings.use_finetuned_emotion_model
+        and FINETUNED_HEAD_PATH.exists()
+        and FINETUNED_BACKBONE.exists()
+    )
+
+
 def load_global_head() -> bool:
-    """Load head + scaler from disk. Returns True if available. Idempotent."""
-    global _head, _scaler, _loaded, _available
+    """
+    Load the active head. Prefers the fine-tuned head (no scaler — it was trained on
+    raw pooled features of the fine-tuned backbone) when present; else the baseline
+    head + StandardScaler. Returns True if available. Idempotent.
+    """
+    global _head, _scaler, _loaded, _available, _active
     if _loaded:
         return _available
 
     _loaded = True
+    import torch
+
+    if _use_finetuned():
+        _head = _build_head()
+        _head.load_state_dict(torch.load(FINETUNED_HEAD_PATH, map_location="cpu"))
+        _head.eval()
+        _scaler = None  # fine-tuned head consumes raw fine-tuned-backbone embeddings
+        _available = True
+        _active = "finetuned"
+        logger.info("Emotion head loaded: FINE-TUNED (%s)", FINETUNED_HEAD_PATH.name)
+        return True
+
     if not HEAD_PATH.exists():
         logger.warning("Global head missing at %s — using neutral fallback", HEAD_PATH)
         _available = False
         return False
-
-    import torch
 
     _head = _build_head()
     _head.load_state_dict(torch.load(HEAD_PATH, map_location="cpu"))
@@ -60,8 +87,15 @@ def load_global_head() -> bool:
         _scaler = None
 
     _available = True
-    logger.info("Global emotion head loaded from %s", HEAD_PATH)
+    _active = "baseline"
+    logger.info("Emotion head loaded: BASELINE (%s)", HEAD_PATH.name)
     return True
+
+
+def active_model() -> str:
+    if not _loaded:
+        load_global_head()
+    return _active
 
 
 def is_available() -> bool:

@@ -11,13 +11,26 @@ import logging
 import librosa
 import numpy as np
 
+from pathlib import Path
+
 from api.feature_config import EMBEDDING_DIM, SAMPLE_RATE, WAV2VEC2_MODEL_NAME
 
 logger = logging.getLogger(__name__)
 
+FINETUNED_BACKBONE = Path(__file__).resolve().parent.parent.parent / "models" / "wav2vec2_finetuned"
+
 _model = None
 _processor = None
 _MIN_SAMPLES = 4800  # 0.3 s at 16 kHz
+
+
+def _backbone_source() -> str:
+    """Fine-tuned backbone if enabled + present, else the base pretrained model."""
+    from api.config import settings
+
+    if settings.use_finetuned_emotion_model and FINETUNED_BACKBONE.exists():
+        return str(FINETUNED_BACKBONE)
+    return WAV2VEC2_MODEL_NAME
 
 
 def _load():
@@ -26,9 +39,11 @@ def _load():
         import torch  # noqa: F401  (ensure torch present)
         from transformers import Wav2Vec2Model, Wav2Vec2Processor
 
-        logger.info("Loading Wav2Vec2 model: %s", WAV2VEC2_MODEL_NAME)
+        source = _backbone_source()
+        logger.info("Loading Wav2Vec2 backbone: %s", source)
+        # Processor (feature normalization) is identical for base and fine-tuned.
         _processor = Wav2Vec2Processor.from_pretrained(WAV2VEC2_MODEL_NAME)
-        _model = Wav2Vec2Model.from_pretrained(WAV2VEC2_MODEL_NAME)
+        _model = Wav2Vec2Model.from_pretrained(source)
         _model.eval()
     return _model, _processor
 

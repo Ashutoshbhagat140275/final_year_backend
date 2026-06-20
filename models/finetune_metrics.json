@@ -1,0 +1,16 @@
+{
+  "test_accuracy": 0.6987,
+  "baseline_accuracy": 0.6241,
+  "per_class_test_accuracy": {
+    "neutral": 0.833,
+    "calm": 0.75,
+    "happy": 0.685,
+    "sad": 0.708,
+    "angry": 0.792,
+    "fearful": 0.569,
+    "disgusted": 0.593,
+    "surprised": 0.833
+  },
+  "split": "speaker-independent",
+  "frozen_bottom_layers": 6
+}

@@ -46,6 +46,8 @@ models/*.joblib
 models/*.npz
 !models/global_emotion_head.pt
 !models/embedding_scaler.joblib
+# Fine-tuned backbone is ~360MB (> GitHub 100MB limit) — regenerate via finetune_wav2vec2.py
+models/wav2vec2_finetuned/
 
 # Datasets (downloaded — never commit, large)
 datasets/

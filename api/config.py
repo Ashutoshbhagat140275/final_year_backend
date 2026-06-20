@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # Speaker pipeline
     enable_speaker_aware_processing: bool = True
 
+    # Emotion model: prefer the fine-tuned backbone+head if its artifacts exist
+    use_finetuned_emotion_model: bool = True
+
     # User-head storage backend
     use_mongodb_storage: bool = False
     dual_save_mode: bool = False
