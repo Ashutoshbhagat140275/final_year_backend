@@ -44,6 +44,13 @@ tiktoken
 more-itertools
 Pillow
 
+# Speaker embeddings (Stage 6) — neural d-vectors for owner detection.
+# Classical librosa-MFCC features can't separate speakers; Resemblyzer can.
+# Install: pip install webrtcvad-wheels  (prebuilt; avoids MSVC build on Windows)
+#          pip install --no-deps resemblyzer
+webrtcvad-wheels
+resemblyzer
+
 # Redis cache (Stage 7+)
 redis==5.0.1
 

@@ -39,11 +39,15 @@ def process_audio(user_id: str, file: UploadFile) -> dict:
     audio_path = _save_file(user_id, file)
     audio_path = _preprocess(audio_path)
 
-    # Stage 4: real Wav2Vec2 embedding + dual-head classification (global-only here)
+    # Stage 6: speaker-aware processing — isolate the owner's voice (fail-soft)
+    speaker_meta = _analyze_speakers(user_id, audio_path)
+    emotion_source = _choose_emotion_source(audio_path, speaker_meta)
+
+    # Stage 4: Wav2Vec2 embedding + dual-head classification
     from api.services.dual_head_classifier import classify_with_dual_heads
     from api.services.wav2vec2_encoder import extract_wav2vec2_embedding
 
-    embedding = extract_wav2vec2_embedding(str(audio_path))
+    embedding = extract_wav2vec2_embedding(str(emotion_source))
     feedback_count = _get_feedback_count(user_id)
     result = classify_with_dual_heads(embedding, user_id, feedback_count)
 
@@ -52,7 +56,8 @@ def process_audio(user_id: str, file: UploadFile) -> dict:
 
     transcription = transcribe_audio(str(audio_path))
     session_id = _persist_session(
-        user_id, audio_path, result["emotion"], result["confidence"], transcription, embedding
+        user_id, audio_path, result["emotion"], result["confidence"],
+        transcription, embedding, speaker_meta,
     )
     _index_transcript(user_id, transcription, session_id, result["emotion"])
 
@@ -70,12 +75,54 @@ def process_audio(user_id: str, file: UploadFile) -> dict:
         "alpha_formula": result["alpha_formula"],
         "transcription": transcription,
         "timestamp": datetime.now(timezone.utc),
-        "owner_speech_ratio": None,
-        "owner_segments_count": None,
-        "other_segments_count": None,
-        "owner_detection_status": None,
-        "speaker_timeline": [],
+        "owner_speech_ratio": speaker_meta.get("owner_speech_ratio") if speaker_meta else None,
+        "owner_segments_count": speaker_meta.get("owner_segments_count") if speaker_meta else None,
+        "other_segments_count": speaker_meta.get("other_segments_count") if speaker_meta else None,
+        "owner_detection_status": speaker_meta.get("owner_detection_status") if speaker_meta else None,
+        "speaker_timeline": speaker_meta.get("speaker_timeline", []) if speaker_meta else [],
     }
+
+
+def _analyze_speakers(user_id: str, audio_path: Path):
+    """Run speaker diarization + owner matching (fail-soft → None)."""
+    from api.config import settings
+
+    if not settings.enable_speaker_aware_processing:
+        return None
+    db = _get_database()
+    if db is None:
+        return None
+    try:
+        from api.services.speaker_service import analyze_speakers_and_extract_owner_audio
+
+        return analyze_speakers_and_extract_owner_audio(str(audio_path), user_id, db)
+    except Exception as exc:
+        logger.warning("Speaker analysis failed (using full audio): %s", exc)
+        return None
+
+
+def _choose_emotion_source(audio_path: Path, speaker_meta) -> Path:
+    """Use the owner-only audio when it exists and is long/loud enough; else full audio."""
+    if not speaker_meta:
+        return audio_path
+    owner_path = speaker_meta.get("owner_audio_path")
+    if not owner_path or not Path(owner_path).exists():
+        return audio_path
+    try:
+        import numpy as np
+
+        y, sr = librosa.load(owner_path, sr=16000, mono=True)
+        if len(y) / sr < 0.5 or float(np.sqrt(np.mean(y ** 2))) < 0.001:
+            return audio_path  # too short/quiet → avoid garbage diarized clip
+    except Exception:
+        return audio_path
+    return Path(owner_path)
+
+
+def _get_database():
+    from api.db.mongodb import get_database
+
+    return get_database()
 
 
 def _get_feedback_count(user_id: str) -> int:
@@ -140,6 +187,22 @@ def _save_file(user_id: str, file: UploadFile) -> Path:
     return dest
 
 
+def save_enrollment_clip(user_id: str, file: UploadFile) -> str:
+    """Validate + save a speaker-enrollment clip; returns its path (loaded at 16k by the service)."""
+    _validate_file(file)
+    enroll_dir = Path(settings.audio_upload_dir) / user_id / "enroll"
+    enroll_dir.mkdir(parents=True, exist_ok=True)
+    ext = (file.filename or "audio.wav").rsplit(".", 1)[-1].lower()
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    dest = enroll_dir / f"{ts}_{uuid.uuid4().hex[:8]}.{ext}"
+    content = file.file.read()
+    if len(content) > settings.max_audio_size_mb * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"File exceeds {settings.max_audio_size_mb} MB limit")
+    dest.write_bytes(content)
+    return str(dest)
+
+
 # ── Preprocess ─────────────────────────────────────────────────────────────────
 
 def _preprocess(path: Path) -> Path:
@@ -184,10 +247,12 @@ def _persist_session(
     confidence: float,
     transcription: str,
     embedding=None,
+    speaker_meta: dict | None = None,
 ) -> str:
     from api.db.mongodb import get_database
     from api.models.audio_session import AudioSession
 
+    sm = speaker_meta or {}
     session_id = str(uuid.uuid4())
     session = AudioSession(
         session_id=session_id,
@@ -195,7 +260,12 @@ def _persist_session(
         audio_file_path=str(audio_path),
         emotion_data={"label": emotion, "emotion": emotion, "confidence": confidence},
         transcription_text=transcription,
-        personalization_trainable=True,
+        speaker_timeline=sm.get("speaker_timeline", []),
+        owner_detection_status=sm.get("owner_detection_status"),
+        owner_speech_ratio=sm.get("owner_speech_ratio"),
+        owner_segments_count=sm.get("owner_segments_count"),
+        other_segments_count=sm.get("other_segments_count"),
+        personalization_trainable=sm.get("personalization_trainable", True),
     )
 
     db = get_database()
